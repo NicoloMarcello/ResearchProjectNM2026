@@ -1,4 +1,3 @@
-
 # import toolboxes used for data visualization
 import mne
 import numpy as np
