@@ -15,4 +15,4 @@ Epochs_data = mne.read_epochs(filepath,preload=True)
 print(f"Epochs data shape: {Epochs_data.get_data().shape}")
 print(Epochs_data.info)
 
-Epochs_data.plot(n_epochs=1,n_channels=4,block=True,scalings='auto')
+Epochs_data.plot(n_epochs=1,n_channels=4,block=True,scalings=1e3)
