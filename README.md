@@ -3,8 +3,6 @@ this repository includes scripts for the visualisation and analysis of the MEG/E
 made by Nicolo Marcello from UCL (nicolo.marcello.24@ucl.ac.uk).
 
 
-
-
 ## MEG/EMG DATA recordings:
 MEG was recorded continuously at 1200 samples/second using a whole-head 275-channel axial gradiometer system (CTF Omega,
 VSM MedTech) while participants sat upright in a magnetically shielded room. Head position coils were attached to nasion, left, and
