@@ -5,8 +5,6 @@ made by Nicolo Marcello from UCL (nicolo.marcello.24@ucl.ac.uk).
 
 
 
-
-
 ## MEG/EMG DATA recordings:
 MEG was recorded continuously at 1200 samples/second using a whole-head 275-channel axial gradiometer system (CTF Omega,
 VSM MedTech) while participants sat upright in a magnetically shielded room. Head position coils were attached to nasion, left, and
@@ -16,20 +14,15 @@ Participants were also fitted with four EMG electrodes to measure finger movemen
 placed above the flexor carpi radialis (FCR), abductor polices brevis (APB), abductor digiti minimi (ADM), first dorsal interossei (FDI).
 FCR was recorded with a belly-belly montage, APB, ADM and FDI with a tendon-belly montage.
 
-## Chanel names
-
-UPPT001/2 = parallel port trigger/stimulus channels (show exactly when button press occured, different amplitudes mean different button was pressed)
+## Chanel naming convention
+UPPT001 = parallel port trigger/stimulus channel
+UPPT002 = show exactly when button press occured, different amplitudes mean different button was pressed
 
 BG1-3 = background gradiometers
-
 BP1-3 = background probes
-
 G11-23 = (Reference Gradiometers): Channels measuring the spatial gradient of the background magnetic field
-
 P11-23 = + (Reference Magnetometers / Probes): Channels measuring the raw magnetic field intensity along specific axes 
-
 Q11-23 (Reference Magnetometers / Probes): Another set of background reference magnetometers orientation-mapped to isolate orthogonal noise components.
-
 R11-23 (Reference Gradiometers): Additional high-order reference gradiometers used in the balancing array.
 
 positions 31 to 304 represent all 275 MEG channels, starting with M
