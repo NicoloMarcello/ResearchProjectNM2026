@@ -41,7 +41,7 @@ UADC = universal analogue-to0digital converter
 ## MEG and EMG preprocessing
 MEG data analysis made use of SPM8 (Litvak et al., 2011, Wellcome Trust Centre for Neuroimaging, London, United Kingdom),
 Fieldtrip (Oostenveld et al., 2011) Donders Institute for Brain Cognition and Behavior) and custom MATLAB code. MEG data
-were downsampled to 1000 Hz, epoched for pre-processing into long trials spanning 2.8 to +12 s around the fractal cue to include
+were downsampled to 1000 Hz, epoched for pre-processing into long trials spanning -2.8 to +12 s around the fractal cue to include
 a baseline fixation, fractal cue, ‘Go’ cue, sequence production and feedback. A 48-52Hz stopband filter was then applied to remove
 the 50 Hz power line noise within these long epochs. Channel artifacts were inspected in each participant, but no channels were
 identified as corrupted in any of the datasets.
