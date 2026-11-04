@@ -1,4 +1,6 @@
 import numpy as np
+import mne
+from scipy.signal import hilbert
 
 
 def circ_regress_db(x, t, k=1000, ppdir=0, phaseLim=2*np.pi):
@@ -126,3 +128,26 @@ def circ_regress_db(x, t, k=1000, ppdir=0, phaseLim=2*np.pi):
         "corr": corr,
         "p": p
     }
+
+
+
+
+def extract_phase_epochs(epochs,low_freq=2,high_freq=40): 
+
+    # 1. Filter raw data or epochs in a specific frequency band (e.g., 8-12 Hz)
+    epochs.load_data()
+    epochs_filtered = epochs.copy().filter(
+        l_freq=low_freq, h_freq=high_freq, fir_design="firwin"
+    )
+
+    # 2. Extract data array: shape is (n_epochs, n_channels, n_times)
+    data = epochs_filtered.get_data()
+
+    # 3. Compute Hilbert transform along the time axis (-1) to get analytic signal
+    analytic_signal = hilbert(data, axis=-1)
+
+    # 4. Extract instantaneous phase
+    phase_data = np.angle(analytic_signal)
+
+    # 5. Optionally store phase back into an EpochsArray for plotting/inspection
+    phase_epochs = mne.EpochsArray(phase_data, epochs.info, tmin=epochs.tmin)
