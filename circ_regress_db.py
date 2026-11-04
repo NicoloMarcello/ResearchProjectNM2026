@@ -1,5 +1,6 @@
 import numpy as np
 import mne
+from functools import lru_cache
 from scipy.signal import hilbert
 
 
@@ -130,6 +131,96 @@ def circ_regress_db(x, t, k=1000, ppdir=0, phaseLim=2*np.pi):
     }
 
 
+
+
+
+
+@lru_cache(maxsize=16)
+def _cached_slope_grid_and_basis(x_values, phaseLim):
+    # Cache the shared slope grid and linear-to-circular basis for repeated batches.
+    x = np.asarray(x_values, dtype=float)
+    m_range = np.arange(-phaseLim, phaseLim + 1e-12, np.pi / 500)
+    slope_basis = np.exp(-1j * x[:, None] * m_range[None, :])
+    return m_range, slope_basis
+
+
+def circ_regress_db_batch(x, t, phaseLim=2 * np.pi):
+    """
+    Vectorized circular-linear regression for multiple phase series.
+
+    Parameters
+    ----------
+    x : array (n,)
+        Linear variable shared by all rows.
+    t : array (n_series, n)
+        Phase angles in radians. Each row is fitted independently.
+    phaseLim : float
+        Maximum slope range.
+
+    Returns
+    -------
+    slopes, phase_offsets, correlations : arrays (n_series,)
+        Fitted values corresponding to circ_regress_db. Permutation p-values
+        are intentionally omitted for this batched calculation.
+    """
+    x = np.asarray(x, dtype=float).flatten()
+    t = np.asarray(t, dtype=float)
+    if t.ndim == 1:
+        t = t[None, :]
+    if t.ndim != 2 or t.shape[1] != len(x):
+        raise ValueError("t must have shape (n_series, len(x))")
+    if not len(x) or not np.isfinite(x).all() or not np.isfinite(t).all():
+        raise ValueError("x and t must contain finite values")
+
+    # Factor the slope search across series instead of repeating it per sensor.
+    m_range, slope_basis = _cached_slope_grid_and_basis(
+        tuple(x), float(phaseLim)
+    )
+    resultants = np.exp(1j * t) @ slope_basis
+    cost = -np.abs(resultants / len(x))
+
+    # Match circ_regress_db tie-breaking: among best fits choose the
+    # smallest absolute slope, then the first candidate in the search grid.
+    best_cost = cost.min(axis=1)
+    tied = cost == best_cost[:, None]
+    abs_slope = np.abs(m_range)
+    best_abs_slope = np.min(
+        np.where(tied, abs_slope[None, :], np.inf), axis=1
+    )
+    best_index = np.argmax(
+        tied & (abs_slope[None, :] == best_abs_slope[:, None]),
+        axis=1,
+    )
+    slopes = m_range[best_index]
+
+    # Calculate each fitted phase offset and circular correlation.
+    residual = t - slopes[:, None] * x[None, :]
+    phase_offsets = np.arctan2(
+        np.sin(residual).sum(axis=1),
+        np.cos(residual).sum(axis=1),
+    )
+    t_mean = np.arctan2(
+        np.sin(t).mean(axis=1), np.cos(t).mean(axis=1)
+    ) % (2 * np.pi)
+    theta = np.mod(np.abs(slopes[:, None]) * x[None, :], 2 * np.pi)
+    theta_mean = np.arctan2(
+        np.sin(theta).mean(axis=1), np.cos(theta).mean(axis=1)
+    ) % (2 * np.pi)
+    t_bar = t - t_mean[:, None]
+    theta_bar = theta - theta_mean[:, None]
+
+    numerator = (np.sin(t_bar) * np.sin(theta_bar)).sum(axis=1)
+    denominator = np.sqrt(
+        (np.sin(t_bar) ** 2).sum(axis=1)
+        * (np.sin(theta_bar) ** 2).sum(axis=1)
+    )
+    correlations = np.divide(
+        numerator,
+        denominator,
+        out=np.full(numerator.shape, np.nan),
+        where=denominator > 0,
+    )
+    return slopes, phase_offsets, correlations
 
 
 def extract_phase_epochs(epochs,low_freq=2,high_freq=40): 
