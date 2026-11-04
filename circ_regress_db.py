@@ -1,6 +1,7 @@
+from functools import lru_cache
+
 import numpy as np
 import mne
-from functools import lru_cache
 from scipy.signal import hilbert
 
 
