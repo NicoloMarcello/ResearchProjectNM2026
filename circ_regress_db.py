@@ -180,7 +180,7 @@ def circ_regress_db_batch(x, t, phaseLim=2 * np.pi):
     resultants = np.exp(1j * t) @ slope_basis
     cost = -np.abs(resultants / len(x))
 
-    # Match circ_regress_db tie-breaking: among best fits choose the
+    # among best fits choose the
     # smallest absolute slope, then the first candidate in the search grid.
     best_cost = cost.min(axis=1)
     tied = cost == best_cost[:, None]
