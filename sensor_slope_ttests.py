@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test participant-level MEG sensor slopes against zero."""
+"""Run sensor-wise one-sample tests on participant slope estimates."""
 
 from pathlib import Path
 
@@ -8,80 +8,111 @@ import pandas as pd
 from scipy.stats import ttest_1samp
 
 
-SLOPE_TABLE_FILE = Path(__file__).resolve().with_name("participant_slope_table.csv")
-OUTPUT_FILE = Path(__file__).resolve().with_name("sensor_slope_ttest_results.csv")
-EXPECTED_N_PARTICIPANTS = 16
+# Use the participant slope table beside this script as input and save results there.
+participant_slope_table_file = Path(__file__).resolve().with_name(
+    "participant_slope_table.csv"
+)
+sensor_slope_ttest_results_file = Path(__file__).resolve().with_name(
+    "sensor_slope_ttest_results.csv"
+)
+n_participants_expected = 16
 
 
 def benjamini_hochberg(p_values):
-    """Return Benjamini-Hochberg adjusted p-values, preserving NaNs."""
+    """Adjust sensor-wise p-values while leaving missing values as NaN."""
     p_values = np.asarray(p_values, dtype=float)
-    adjusted = np.full(p_values.shape, np.nan)
+    adjusted_p_values = np.full(p_values.shape, np.nan)
     valid_indices = np.flatnonzero(np.isfinite(p_values))
 
     if not len(valid_indices):
-        return adjusted
+        return adjusted_p_values
 
-    order = np.argsort(p_values[valid_indices])
-    sorted_p = p_values[valid_indices][order]
-    ranks = np.arange(1, len(sorted_p) + 1)
-    sorted_adjusted = sorted_p * len(sorted_p) / ranks
-    sorted_adjusted = np.minimum.accumulate(sorted_adjusted[::-1])[::-1]
-    adjusted[valid_indices[order]] = np.clip(sorted_adjusted, 0, 1)
-    return adjusted
+    # Rank valid p-values, scale by the number of tests, and enforce monotonicity.
+    sort_order = np.argsort(p_values[valid_indices])
+    sorted_p_values = p_values[valid_indices][sort_order]
+    ranks = np.arange(1, len(sorted_p_values) + 1)
+    sorted_adjusted_p_values = sorted_p_values * len(sorted_p_values) / ranks
+    sorted_adjusted_p_values = np.minimum.accumulate(
+        sorted_adjusted_p_values[::-1]
+    )[::-1]
+    adjusted_p_values[valid_indices[sort_order]] = np.clip(
+        sorted_adjusted_p_values, 0, 1
+    )
+    return adjusted_p_values
 
 
 def main():
-    # Each input row is one participant and each column is one MEG sensor.
-    slope_table = pd.read_csv(SLOPE_TABLE_FILE)
-    if slope_table.shape[0] != EXPECTED_N_PARTICIPANTS:
+    # Load one participant per row and one MEG sensor per column.
+    participant_slope_table = pd.read_csv(participant_slope_table_file)
+
+    # Check the expected participant count and unique sensor names.
+    if participant_slope_table.shape[0] != n_participants_expected:
         raise ValueError(
             "Expected "
-            + str(EXPECTED_N_PARTICIPANTS)
+            + str(n_participants_expected)
             + " participant rows in "
-            + str(SLOPE_TABLE_FILE.name)
+            + participant_slope_table_file.name
             + ", found "
-            + str(slope_table.shape[0])
+            + str(participant_slope_table.shape[0])
             + "."
         )
-    if slope_table.columns.duplicated().any():
+    if participant_slope_table.columns.duplicated().any():
         raise ValueError("The slope table contains duplicate sensor columns.")
 
-    # Convert the participant × sensor table to sensors × participants for axis=1.
-    slope_table = slope_table.apply(pd.to_numeric, errors="coerce")
-    slope_by_sensor = slope_table.to_numpy(dtype=float).T
-    n_participants = np.isfinite(slope_by_sensor).sum(axis=1)
-    if np.any(n_participants < 2):
-        bad_sensors = slope_table.columns[np.flatnonzero(n_participants < 2)]
+    # Convert the table to numeric data and arrange it as sensors × participants.
+    participant_slope_table = participant_slope_table.apply(
+        pd.to_numeric, errors="coerce"
+    )
+    sensor_slope_by_participant = participant_slope_table.to_numpy(
+        dtype=float
+    ).T
+
+    # Count the valid participant values available for each sensor.
+    n_participants_by_sensor = np.isfinite(
+        sensor_slope_by_participant
+    ).sum(axis=1)
+    if np.any(n_participants_by_sensor < 2):
+        insufficient_sensors = participant_slope_table.columns[
+            np.flatnonzero(n_participants_by_sensor < 2)
+        ]
         raise ValueError(
             "At least two finite participant slopes are required for each sensor. "
             + "Insufficient data for: "
-            + ", ".join(map(str, bad_sensors))
+            + ", ".join(map(str, insufficient_sensors))
         )
 
-    # Run a two-sided one-sample t-test for every sensor against zero.
-    test_results = ttest_1samp(
-        slope_by_sensor,
+    # Test each sensor's participant slopes against zero with a two-sided t-test.
+    sensor_slope_ttest = ttest_1samp(
+        sensor_slope_by_participant,
         popmean=0.0,
         axis=1,
         nan_policy="omit",
     )
 
-    # Summarize estimates and adjust for testing across all MEG sensors.
-    results = pd.DataFrame({
-        "sensor": slope_table.columns,
-        "n_participants": n_participants,
-        "mean_slope_rad_per_press": np.nanmean(slope_by_sensor, axis=1),
-        "std_slope_rad_per_press": np.nanstd(slope_by_sensor, axis=1, ddof=1),
-        "t_statistic": test_results.statistic,
-        "p_value": test_results.pvalue,
+    # Summarize each sensor and adjust p-values across the sensor tests.
+    sensor_slope_test_results = pd.DataFrame({
+        "sensor": participant_slope_table.columns,
+        "n_participants": n_participants_by_sensor,
+        "mean_slope_rad_per_press": np.nanmean(
+            sensor_slope_by_participant, axis=1
+        ),
+        "std_slope_rad_per_press": np.nanstd(
+            sensor_slope_by_participant, axis=1, ddof=1
+        ),
+        "t_statistic": sensor_slope_ttest.statistic,
+        "p_value": sensor_slope_ttest.pvalue,
     })
-    results["p_value_fdr"] = benjamini_hochberg(results["p_value"].to_numpy())
-    results.to_csv(OUTPUT_FILE, index=False)
+    sensor_slope_test_results["p_value_fdr"] = benjamini_hochberg(
+        sensor_slope_test_results["p_value"].to_numpy()
+    )
 
-    print("Participants in each test:", EXPECTED_N_PARTICIPANTS)
-    print("Sensors tested:", len(results))
-    print("Saved results to:", OUTPUT_FILE)
+    # Save the results and report how many tests were run.
+    sensor_slope_test_results.to_csv(
+        sensor_slope_ttest_results_file, index=False
+    )
+    print("Participants in source table:", len(participant_slope_table))
+    print("Sensors tested:", len(sensor_slope_test_results))
+    print("Saved results to:", sensor_slope_ttest_results_file)
 
 
 if __name__ == "__main__":
