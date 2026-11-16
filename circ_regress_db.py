@@ -145,7 +145,7 @@ def _cached_slope_grid_and_basis(x_values, phaseLim):
     return m_range, slope_basis
 
 
-def circ_regress_db_batch(x, t, phaseLim=2 * np.pi):
+def circ_regress_db_batch(x, t, phaseLim=4 * np.pi):
     """
     Vectorized circular-linear regression for multiple phase series.
 
