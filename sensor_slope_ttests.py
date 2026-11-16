@@ -103,9 +103,8 @@ def plot_sensor_slope_results(sensor_slope_test_results, sensor_info):
     sensor_slope_test_results = sensor_slope_test_results.set_index(
         "sensor"
     ).loc[sensor_info["ch_names"]]
-    mean_slope = sensor_slope_test_results[
-        "mean_slope_rad_per_press"
-    ].to_numpy(dtype=float)
+    
+    mean_slope = sensor_slope_test_results["mean_slope_rad_per_press"].to_numpy(dtype=float)
     p_values = sensor_slope_test_results["p_value"].to_numpy(dtype=float)
 
     # Highlight sensors with the requested unadjusted p-value threshold.
@@ -122,8 +121,6 @@ def plot_sensor_slope_results(sensor_slope_test_results, sensor_info):
             index for index, kind in enumerate(sensor_types)
             if kind == sensor_type
         ])
-        if not len(sensor_picks):
-            continue
 
         type_info = mne.pick_info(sensor_info, sensor_picks, copy=True)
         fig, ax = plt.subplots(figsize=(7, 6))
@@ -162,9 +159,6 @@ def plot_sensor_slope_results(sensor_slope_test_results, sensor_info):
         plotted_sensor_types.append(sensor_type)
         print("Saved scalp map to:", plot_file)
 
-    # MNE topomaps support the scalp MEG sensor types plotted above.
-    if not plotted_sensor_types:
-        raise ValueError("No magnetometer or gradiometer sensors were found.")
 
 
 def main():
