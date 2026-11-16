@@ -13,13 +13,13 @@ from scipy.stats import ttest_1samp
 
 # Use the participant slope table beside this script as input and save results there.
 participant_slope_table_file = Path(__file__).resolve().with_name(
-    "participant_slope_table.csv"
+    "participant_slope_table_4pi.csv"
 )
 sensor_slope_ttest_results_file = Path(__file__).resolve().with_name(
-    "sensor_slope_ttest_results.csv"
+    "sensor_slope_ttest_results_4pi.csv"
 )
 sensor_slope_ttest_topomap_file = Path(__file__).resolve().with_name(
-    "sensor_slope_ttest_topomap.png"
+    "sensor_slope_ttest_topomap_4pi.png"
 )
 n_participants_expected = 16
 
@@ -98,6 +98,7 @@ def load_sensor_info(sensor_names):
 
 
 def plot_sensor_slope_results(sensor_slope_test_results, sensor_info):
+    
     # Align the test results with the sensor order in the MNE metadata.
     sensor_slope_test_results = sensor_slope_test_results.set_index(
         "sensor"
@@ -212,6 +213,9 @@ def main():
         axis=1,
         nan_policy="omit",
     )
+
+    significant_sensors = sensor_slope_ttest.pvalue < 0.01
+    print(f"Number of significant sensors: {np.sum(significant_sensors)}")
 
     # Summarize each sensor and adjust p-values across the sensor tests.
     sensor_slope_test_results = pd.DataFrame({
