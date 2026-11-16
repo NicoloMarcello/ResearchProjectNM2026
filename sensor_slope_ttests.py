@@ -13,13 +13,13 @@ from scipy.stats import ttest_1samp
 
 # Use the participant slope table beside this script as input and save results there.
 participant_slope_table_file = Path(__file__).resolve().with_name(
-    "participant_slope_table_4pi.csv"
+    "participant_slope_table_2pi.csv"
 )
 sensor_slope_ttest_results_file = Path(__file__).resolve().with_name(
-    "sensor_slope_ttest_results_4pi.csv"
+    "sensor_slope_ttest_results_2pi.csv"
 )
 sensor_slope_ttest_topomap_file = Path(__file__).resolve().with_name(
-    "sensor_slope_ttest_topomap_4pi.png"
+    "sensor_slope_ttest_topomap_2pi.png"
 )
 n_participants_expected = 16
 
