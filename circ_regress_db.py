@@ -5,7 +5,7 @@ import mne
 from scipy.signal import hilbert
 
 
-def circ_regress_db(x, t, k=1000, ppdir=0, phaseLim=2*np.pi):
+def circ_regress_db(x, t, k=1000, ppdir=0, phaseLim=4*np.pi):
     """
     Circular–linear regression by exhaustive search.
     Ported from Daniel Bush (2020) MATLAB version.
@@ -145,7 +145,7 @@ def _cached_slope_grid_and_basis(x_values, phaseLim):
     return m_range, slope_basis
 
 
-def circ_regress_db_batch(x, t, phaseLim=4 * np.pi):
+def circ_regress_db_batch(x, t, phaseLim= 4 * np.pi):
     """
     Vectorized circular-linear regression for multiple phase series.
 

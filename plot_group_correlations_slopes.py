@@ -39,7 +39,7 @@ group_info = mne.pick_info(epochs.info, meg_picks, copy=True)
 
 # The results CSV has one sensor per row. Set the sensor name as the index, then
 # reorder its rows to match MEG_sens so values cannot be plotted at the wrong site.
-group_corr_results = pd.read_csv("group_corr_results.csv")
+group_corr_results = pd.read_csv("group_corr_results_4pi.csv")
 group_corr_results = group_corr_results.set_index("sensor").loc[MEG_sens]
 
 # Plot both metrics stored in the CSV. Each map uses a symmetric color scale so
