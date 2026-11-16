@@ -139,6 +139,7 @@ def plot_sensor_slope_results(sensor_slope_test_results, sensor_info):
                 "marker": "o",
                 "markerfacecolor": "yellow",
                 "markeredgecolor": "black",
+                "linestyle": "None",
                 "linewidth": 0.7,
                 "markersize": 7,
             },
