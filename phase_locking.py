@@ -1,10 +1,11 @@
-"""Measure theta phase locking at button presses for each MEG sensor and trial.
+"""Save participant-level mean theta phase-locking values for MEG sensors.
 
-For each included participant, this script filters MEG epochs to the theta band,
-extracts phase at the five button-press times, and applies scipy.stats.directional_stats
-to the corresponding unit vectors. The mean resultant length ranges from 0 to 1;
-larger values indicate that press phases are more concentrated within that trial.
-These are descriptive phase-locking measures, not significance tests.
+For each included participant and trial, this script filters MEG epochs to the theta
+band, extracts phase at the five button-press times, and uses scipy.stats.directional_stats
+to calculate the mean direction vector and mean resultant length. It then averages the
+trial-wise mean resultant lengths for each participant and sensor and saves a wide
+participant-by-sensor CSV table. Larger values indicate more concentrated press phases.
+The values are descriptive and are not significance tests.
 """
 
 import argparse
@@ -19,12 +20,14 @@ from scipy.stats import directional_stats
 # Set MEG_DATA_ROOT or pass --data-root to select a local MEG export.
 data_root = os.environ.get("MEG_DATA_ROOT")
 
-# Keep the button-press timing file alongside this script by default.
+# Keep the button-press timing file and output table alongside this script by default.
 script_folder = os.path.dirname(os.path.abspath(__file__))
 button_press_times_file = os.path.join(
     script_folder, "UPPT002_button_press_times.npz"
 )
-output_file = os.path.join(script_folder, "phase_locking_results.csv")
+output_file = os.path.join(
+    script_folder, "participant_phase_locking_table.csv"
+)
 
 # Define the theta frequency band and analysis settings.
 theta_freq_band = [2.0, 5.0]                 # theta band edges in Hz
@@ -104,7 +107,21 @@ def filename_loader(id, data_root):
     return epochs, MEG_sens
 
 
-# Calculate one phase-locking result for each selected trial and MEG sensor.
+# Average finite trial values and preserve NaN when no valid values are available.
+def mean_finite(values, axis=0):
+    values = np.asarray(values)
+    counts = np.isfinite(values).sum(axis=axis)
+    return np.divide(
+        np.nansum(values, axis=axis),
+        counts,
+        out=np.full(
+            counts.shape, np.nan, dtype=np.result_type(values.dtype, float)
+        ),
+        where=counts > 0,
+    )
+
+
+# Calculate and average trial-wise phase-locking values for one participant.
 def participant_phase_locking(
     id,
     UPPT002_times,
@@ -112,7 +129,6 @@ def participant_phase_locking(
     cue_onset_after_epoch_start_s,
     press_slot,
     data_root,
-    trial_number=None,
 ):
     # Load this participant's epochs and confirm the timing rows match.
     epochs, MEG_sens = filename_loader(id, data_root)
@@ -140,37 +156,9 @@ def participant_phase_locking(
 
     # Use the same complete-press-trial rule as phase_real.ipynb.
     complete_trial = valid_press.sum(axis=1) == len(press_slot)
-    if trial_number is None:
-        trials_to_process = np.arange(n_trials)
-    else:
-        if trial_number < 1:
-            raise ValueError("Trial numbers start at 1")
-        if trial_number > n_trials:
-            return None, MEG_sens, 0
-        trials_to_process = np.asarray([trial_number - 1], dtype=int)
 
-    # Store one phase vector and resultant length per selected trial and sensor.
-    trial_resultant_x = np.full(
-        (len(trials_to_process), len(MEG_sens)), np.nan
-    )
-    trial_resultant_y = np.full_like(trial_resultant_x, np.nan)
-    trial_direction_x = np.full_like(trial_resultant_x, np.nan)
-    trial_direction_y = np.full_like(trial_resultant_x, np.nan)
-    trial_resultant_length = np.full_like(trial_resultant_x, np.nan)
-    trial_preferred_phase = np.full_like(trial_resultant_x, np.nan)
-    trial_phase_sample_count = np.zeros(
-        (len(trials_to_process), len(MEG_sens)), dtype=int
-    )
-    trial_status = np.full(
-        (len(trials_to_process), len(MEG_sens)),
-        "incomplete_press_times",
-        dtype=object,
-    )
-
-    # Mark complete trials before filtering; sensors with valid samples are updated below.
-    for output_index, trial in enumerate(trials_to_process):
-        if complete_trial[trial]:
-            trial_status[output_index, :] = "no_finite_phase_samples"
+    # Store the trial-wise resultant length for averaging; invalid trials remain NaN.
+    trial_resultant_length = np.full((n_trials, len(MEG_sens)), np.nan)
 
     # Filter and transform a small channel batch at a time to limit working memory.
     for start in range(0, len(MEG_sens), channel_batch_size):
@@ -201,25 +189,11 @@ def participant_phase_locking(
         ).apply_hilbert(envelope=False, verbose="ERROR")
         analytic = epochs_batch.get_data()
 
-        # Find the circular phase vector across the five press slots for each trial.
-        for output_index, trial in enumerate(trials_to_process):
-            if not complete_trial[trial]:
-                continue
-
+        # Find a circular phase vector across the five press slots for each trial.
+        for trial in np.flatnonzero(complete_trial):
             samples = sample_indices[trial]
             phase_by_sensor = np.angle(analytic[trial][:, samples])
-            n_finite = np.isfinite(phase_by_sensor).sum(axis=1)
-            trial_phase_sample_count[
-                output_index, start:start + len(channel_batch)
-            ] = n_finite
-
-            valid_sensor = n_finite == len(press_slot)
-            partial_sensor = (n_finite > 0) & ~valid_sensor
-            trial_status[
-                output_index,
-                start + np.flatnonzero(partial_sensor),
-            ] = "incomplete_phase_samples"
-
+            valid_sensor = np.isfinite(phase_by_sensor).all(axis=1)
             if not valid_sensor.any():
                 continue
 
@@ -229,80 +203,42 @@ def participant_phase_locking(
                 (np.cos(valid_phase), np.sin(valid_phase)), axis=-1
             )
 
-            # Each sensor contributes five unit vectors; summarize across press slots.
+            # Summarize each sensor's press vectors and retain its locking strength.
             directional_summary = directional_stats(
                 phase_vectors, axis=1, normalize=False
             )
-            mean_direction = np.asarray(
-                directional_summary.mean_direction, dtype=float
-            )
-            mean_resultant_length = np.asarray(
-                directional_summary.mean_resultant_length, dtype=float
-            )
-
-            # Reconstruct the mean resultant vector; its length is the locking strength.
-            mean_resultant_vector = np.zeros_like(mean_direction)
-            np.multiply(
-                mean_direction,
-                mean_resultant_length[:, None],
-                out=mean_resultant_vector,
-                where=np.isfinite(mean_direction),
-            )
             sensor_indices = start + np.flatnonzero(valid_sensor)
-            trial_resultant_x[output_index, sensor_indices] = (
-                mean_resultant_vector[:, 0]
+            trial_resultant_length[trial, sensor_indices] = (
+                directional_summary.mean_resultant_length
             )
-            trial_resultant_y[output_index, sensor_indices] = (
-                mean_resultant_vector[:, 1]
-            )
-            trial_direction_x[output_index, sensor_indices] = mean_direction[:, 0]
-            trial_direction_y[output_index, sensor_indices] = mean_direction[:, 1]
-            trial_resultant_length[output_index, sensor_indices] = (
-                mean_resultant_length
-            )
-            trial_preferred_phase[output_index, sensor_indices] = np.arctan2(
-                mean_direction[:, 1], mean_direction[:, 0]
-            )
-            trial_status[output_index, sensor_indices] = "ok"
 
         # Release this batch's temporary arrays before processing the next channel set.
         del analytic
         del epochs_batch
         del channel_data
 
-    # Release the full participant array before returning the trial results.
-    del MEG_data
-
-    # Organize one result row per trial and sensor.
-    n_sensors = len(MEG_sens)
-    trial_labels = trials_to_process + 1
-    results = pd.DataFrame(
-        {
-            "participant": id,
-            "trial": np.repeat(trial_labels, n_sensors),
-            "sensor": np.tile(MEG_sens, len(trials_to_process)),
-            "n_valid_press_times": np.repeat(
-                valid_press[trials_to_process].sum(axis=1), n_sensors
-            ),
-            "n_phase_samples": trial_phase_sample_count.reshape(-1),
-            "resultant_vector_x": trial_resultant_x.reshape(-1),
-            "resultant_vector_y": trial_resultant_y.reshape(-1),
-            "mean_direction_x": trial_direction_x.reshape(-1),
-            "mean_direction_y": trial_direction_y.reshape(-1),
-            "mean_resultant_length": trial_resultant_length.reshape(-1),
-            "preferred_phase_rad": trial_preferred_phase.reshape(-1),
-            "status": trial_status.reshape(-1),
-        }
+    # Average valid trial values separately for each sensor.
+    participant_mean = mean_finite(trial_resultant_length, axis=0)
+    n_trials_with_phase = int(
+        np.isfinite(trial_resultant_length).any(axis=1).sum()
     )
 
-    return results, MEG_sens, int(complete_trial[trials_to_process].sum())
+    # Release the full participant array before returning the sensor means.
+    del MEG_data
+
+    return (
+        participant_mean,
+        MEG_sens,
+        int(complete_trial.sum()),
+        n_trials_with_phase,
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Calculate theta phase-locking vectors at button presses for "
-            "each included participant and MEG sensor."
+            "Save mean theta phase-locking values across trials for each "
+            "included participant and MEG sensor."
         )
     )
     parser.add_argument(
@@ -318,20 +254,12 @@ def main():
     parser.add_argument(
         "--output-file",
         default=output_file,
-        help="CSV file for trial-by-sensor phase-locking results.",
-    )
-    parser.add_argument(
-        "--trial",
-        type=int,
-        default=None,
-        help="Optional 1-based trial number; by default, process all trials.",
+        help="Wide participant-by-sensor CSV output file.",
     )
     args = parser.parse_args()
 
     if not args.data_root:
         parser.error("Set MEG_DATA_ROOT or pass --data-root")
-    if args.trial is not None and args.trial < 1:
-        raise ValueError("Trial numbers start at 1")
     if os.path.abspath(args.output_file) == os.path.abspath(
         args.button_press_times_file
     ):
@@ -346,60 +274,46 @@ def main():
     ) = load_button_press_times(args.button_press_times_file)
 
     # Keep two-digit subject labels and omit subject 11, as in phase_real.ipynb.
-    sub_ID = [
-        id for id in subject_ID if id not in excluded_subjects
-    ]
+    sub_ID = [id for id in subject_ID if id not in excluded_subjects]
     subject_index = {id: index for index, id in enumerate(subject_ID)}
     if not sub_ID:
         raise ValueError("No participants remain after applying excluded_subjects.")
 
-    if args.trial is not None and args.trial > int(n_trials_by_subject.max()):
-        raise ValueError("The requested trial exceeds the timing file trial counts")
-
-    rows_written = 0
+    participant_means = []
+    group_sensors = None
     for id in sub_ID:
         data_index = subject_index[id]
         n_trials = int(n_trials_by_subject[data_index])
-        results, MEG_sens, n_complete_trials = participant_phase_locking(
-            id,
-            UPPT002_times[data_index],
-            n_trials,
-            cue_onset_after_epoch_start_s,
-            press_slot,
-            args.data_root,
-            trial_number=args.trial,
+        participant_mean, MEG_sens, n_complete_trials, n_trials_with_phase = (
+            participant_phase_locking(
+                id,
+                UPPT002_times[data_index],
+                n_trials,
+                cue_onset_after_epoch_start_s,
+                press_slot,
+                args.data_root,
+            )
         )
 
-        if results is None:
-            print(
-                "Participant", id, "- requested trial", args.trial,
-                "is not present; skipping participant."
-            )
-            continue
-
-        # Keep sensor order fixed so every participant uses consistent labels.
-        if rows_written == 0:
+        # Keep sensor order fixed so every participant contributes to the same columns.
+        if group_sensors is None:
             group_sensors = MEG_sens
         elif MEG_sens != group_sensors:
             raise ValueError("MEG sensor order differs for participant " + id)
 
-        results.to_csv(
-            args.output_file,
-            index=False,
-            mode="w" if rows_written == 0 else "a",
-            header=(rows_written == 0),
-        )
-        rows_written += len(results)
+        participant_means.append(participant_mean)
         print(
             "Participant", id,
             "- complete trials:", n_complete_trials,
-            "- sensor-trial rows:", len(results),
+            "- trials with phase data:", n_trials_with_phase,
         )
 
-    if rows_written == 0:
-        raise ValueError("No participant trial results were written")
-
-    print("Saved phase-locking results to", args.output_file)
+    # Rows are participants and columns are MEG sensors, matching the slope table layout.
+    participant_phase_locking_table = pd.DataFrame(
+        participant_means, index=sub_ID, columns=group_sensors
+    )
+    participant_phase_locking_table.to_csv(args.output_file, index=False)
+    print("Saved participant mean phase-locking table to", args.output_file)
 
 
 if __name__ == "__main__":
