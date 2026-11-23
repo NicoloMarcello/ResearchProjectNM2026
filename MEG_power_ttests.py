@@ -18,7 +18,7 @@ import mne
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import probplot, ttest_1samp
+from scipy.stats import norm, ttest_1samp
 
 
 # Use data paths and outputs in the script directory by default.
@@ -270,11 +270,31 @@ def save_qq_plots(sensor_power_by_participant, sensor_names, output_file):
                 values = sensor_power_by_participant[sensor_index]
                 values = values[np.isfinite(values)]
                 if len(values) >= 2:
-                    probplot(values, dist="norm", plot=ax)
+                    # Pair observed quantiles with theoretical standard-normal quantiles.
+                    probabilities = (
+                        np.arange(1, len(values) + 1, dtype=float) - 0.5
+                    ) / len(values)
+                    normal_quantiles = norm.ppf(probabilities)
+                    observed_quantiles = np.sort(values)
+                    slope, intercept = np.polyfit(
+                        normal_quantiles, observed_quantiles, 1
+                    )
+                    ax.scatter(
+                        normal_quantiles, observed_quantiles,
+                        s=10, color="tab:blue",
+                    )
+                    ax.plot(
+                        normal_quantiles,
+                        slope * normal_quantiles + intercept,
+                        color="tab:red",
+                        linewidth=1,
+                    )
                     ax.set_title(
                         str(sensor_names[sensor_index]) + " (n=" + str(len(values)) + ")",
                         fontsize=8,
                     )
+                    ax.set_xlabel("Theoretical normal quantiles", fontsize=6)
+                    ax.set_ylabel("Observed dB quantiles", fontsize=6)
                     ax.tick_params(labelsize=6)
                 else:
                     ax.set_title(str(sensor_names[sensor_index]), fontsize=8)
