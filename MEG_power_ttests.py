@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run sensor-wise one-sample tests on participant theta-power changes.
 
 The power calculation follows MEG_powerplot_all.ipynb: theta-band power in
@@ -21,7 +20,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm, ttest_1samp
 
 
-# Use data paths and outputs in the script directory by default.
+# Use data paths and outputs in the directory.
 script_folder = Path(__file__).resolve().parent
 participant_power_table_file = script_folder / "participant_power_change_dB.csv"
 power_ttest_results_file = script_folder / "power_ttest_results_4pi.csv"
@@ -30,7 +29,7 @@ power_ttest_topomap_file = script_folder / "power_ttest_topomap_4pi.png"
 
 # Match the participant list and power settings in MEG_powerplot_all.ipynb.
 sub_ID = [
-    "05", "06", "08", "09", "10", "11", "13", "14", "15",
+    "05", "06", "08", "09", "10", "13", "14", "15",
     "16", "17", "18", "20", "21", "24", "25", "28",
 ]
 excluded_subjects = []
@@ -383,7 +382,7 @@ def main():
     parser.add_argument(
         "--data-root",
         type=Path,
-        default=Path(os.environ["MEG_DATA_ROOT"]) if os.environ.get("MEG_DATA_ROOT") else None,
+        default= os.environ.get("MEG_DATA_ROOT", r"//rdp.arc.ucl.ac.uk/ritd-ag-project-rd01pz-dbush99/Katja Button Press Data"),
         help="MEG data directory containing beh_data and participant folders.",
     )
     parser.add_argument(
@@ -488,6 +487,7 @@ def main():
         "participant": subjects_used,
         "retained_press_count": retained_press_counts,
     })
+
     print("Participants tested:", len(participant_power_table))
     print("Sensors tested:", len(results))
     print("Sensors with raw p < 0.01:", int((results["p_value"] < 0.01).sum()))

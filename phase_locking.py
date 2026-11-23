@@ -18,11 +18,8 @@ from scipy.stats import directional_stats
 
 
 # Set MEG_DATA_ROOT or pass --data-root to select a local MEG export.
-<<<<<<< HEAD
 data_root = os.environ.get("MEG_DATA_ROOT", r"//rdp.arc.ucl.ac.uk/ritd-ag-project-rd01pz-dbush99/Katja Button Press Data")
-=======
-data_root = os.environ.get("MEG_DATA_ROOT")
->>>>>>> 1e12273e202392308a0c6b32ae6ea5a30653e2e4
+
 
 # Keep the button-press timing file and output table alongside this script by default.
 script_folder = os.path.dirname(os.path.abspath(__file__))
