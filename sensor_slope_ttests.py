@@ -5,10 +5,9 @@ import argparse
 import os
 from pathlib import Path
 
-import mne
 import pandas as pd
 
-from meg_data import load_epochs
+from meg_data import load_sensor_info
 from sensor_stats import sensor_wise_one_sample_ttest
 from sensor_topomaps import plot_sensor_test_topomaps
 
@@ -19,27 +18,6 @@ sensor_slope_ttest_results_file = script_folder / "sensor_slope_ttest_results_4p
 sensor_slope_ttest_topomap_file = script_folder / "sensor_slope_ttest_topomap_4pi.png"
 n_participants_expected = 16
 reference_subject_id = "05"
-
-
-def load_sensor_info(sensor_names, data_root):
-    # Read channel locations from one participant's epochs without loading MEG data.
-    if data_root is None:
-        raise ValueError("Set MEG_DATA_ROOT or pass --data-root for sensor locations")
-    epochs = load_epochs(
-        data_root, reference_subject_id, preload=False, verbose="ERROR"
-    )
-    missing_sensors = [
-        sensor for sensor in sensor_names if sensor not in epochs.ch_names
-    ]
-    if missing_sensors:
-        raise ValueError(
-            "The reference epochs file is missing slope-table sensors: "
-            + ", ".join(missing_sensors[:10])
-        )
-    sensor_picks = mne.pick_channels(
-        epochs.ch_names, include=list(sensor_names), ordered=True
-    )
-    return mne.pick_info(epochs.info, sensor_picks, copy=True)
 
 
 def main():
