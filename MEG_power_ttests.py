@@ -208,7 +208,7 @@ def main():
     parser.add_argument(
         "--data-root",
         type=Path,
-        default= os.environ.get("MEG_DATA_ROOT", r"//rdp.arc.ucl.ac.uk/ritd-ag-project-rd01pz-dbush99/Katja Button Press Data"),
+        default=Path(os.environ["MEG_DATA_ROOT"]) if os.environ.get("MEG_DATA_ROOT") else None,
         help="MEG data directory containing beh_data and participant folders.",
     )
     parser.add_argument(
