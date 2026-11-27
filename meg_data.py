@@ -66,6 +66,25 @@ def meg_sensor_names(epochs, prefix="M"):
     return sensor_names
 
 
+def load_sensor_info(data_root, sensor_names, reference_subject_id="05"):
+    """Load MNE metadata for a requested ordered set of sensors."""
+    if data_root is None:
+        raise ValueError("Set MEG_DATA_ROOT or pass --data-root for sensor locations")
+    epochs = load_epochs(
+        data_root, reference_subject_id, preload=False, verbose="ERROR"
+    )
+    missing = [sensor for sensor in sensor_names if sensor not in epochs.ch_names]
+    if missing:
+        raise ValueError(
+            "The reference epochs file is missing requested sensors: "
+            + ", ".join(missing[:10])
+        )
+    sensor_picks = mne.pick_channels(
+        epochs.ch_names, include=list(sensor_names), ordered=True
+    )
+    return mne.pick_info(epochs.info, sensor_picks, copy=True)
+
+
 def load_participant_data(
     data_root,
     subject_id,
