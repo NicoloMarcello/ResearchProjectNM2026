@@ -84,7 +84,9 @@ def main():
 
     # Plot participant mean phase-locking strength and mark raw p < 0.01 sensors.
     sensor_info = load_sensor_info(
-        participant_phase_locking_table.columns, args.data_root
+        args.data_root,
+        participant_phase_locking_table.columns,
+        reference_subject_id=reference_subject_id,
     )
     plot_sensor_test_topomaps(
         phase_locking_test_results,
