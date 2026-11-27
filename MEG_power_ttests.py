@@ -19,6 +19,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
 
 from meg_data import load_participant_data
+from meg_power import epochs_maker, mean_band_power, press_time_flattener
 from sensor_stats import sensor_wise_one_sample_ttest
 from sensor_topomaps import plot_sensor_test_topomaps
 
@@ -42,65 +43,6 @@ baseline_time_wind = np.array([-1.0, 0.0])   # baseline window before each trial
 mean_time_offset = -0.0468                   # MEG trigger offset in seconds
 sens_delay = 2.8 + mean_time_offset          # cue time relative to epoch start
 n_press_slots = 5
-
-
-def press_time_flattener(press_times, trial_time):
-    # Shift press times onto the concatenated timeline and retain each trial ID.
-    n_trials, n_slots = press_times.shape
-    trial_offsets = np.arange(n_trials, dtype=float) * trial_time
-    press_times_shifted = press_times + sens_delay + trial_offsets[:, None]
-    trial_cutoff_times = sens_delay + trial_offsets
-
-    valid = np.isfinite(press_times_shifted)
-    press_trial_indices = np.broadcast_to(
-        np.arange(n_trials)[:, None], (n_trials, n_slots)
-    )[valid]
-    return press_times_shifted[valid], trial_cutoff_times, press_trial_indices
-
-
-def epochs_maker(raw, events, window, sfreq, name):
-    # Convert event times to samples and extract the requested time window.
-    samples = np.rint(np.asarray(events, dtype=float) * sfreq).astype(int)
-    event_array = np.column_stack([
-        samples,
-        np.zeros(len(samples), dtype=int),
-        np.ones(len(samples), dtype=int),
-    ])
-    return mne.Epochs(
-        raw,
-        event_array,
-        event_id={"event": 1},
-        tmin=float(window[0]),
-        tmax=float(window[1]) - 1.0 / sfreq,
-        baseline=None,
-        preload=True,
-        verbose="ERROR",
-    )
-
-
-def mean_band_power(epochs, band, MEG_sens):
-    # Get data in epochs x sensors x time order.
-    x = epochs.get_data(picks=MEG_sens)
-    sfreq = float(epochs.info["sfreq"])
-    n_times = x.shape[-1]
-    if not np.isclose(n_times / sfreq, 1.0):
-        raise ValueError("Expected a 1-second epoch")
-
-    # Calculate a Hann-windowed, one-sided power spectral density.
-    window = np.hanning(n_times)
-    x = x - x.mean(axis=-1, keepdims=True)
-    fft = np.fft.rfft(x * window, axis=-1)
-    psd = (np.abs(fft) ** 2) / (sfreq * np.sum(window ** 2))
-    freqs = np.fft.rfftfreq(n_times, d=1.0 / sfreq)
-
-    # Integrate the frequency bins within the requested band.
-    in_band = (freqs >= band[0]) & (freqs <= band[1])
-    band_psd = psd[..., in_band]
-    band_freqs = freqs[in_band]
-    return np.sum(
-        0.5 * (band_psd[..., 1:] + band_psd[..., :-1]) * np.diff(band_freqs),
-        axis=-1,
-    )
 
 
 def participant_theta_power(id, data_root):
@@ -128,7 +70,7 @@ def participant_theta_power(id, data_root):
     raw = mne.io.RawArray(MEG_data, sensor_info, verbose="ERROR")
 
     press_times_shifted, trial_cutoff_times, press_trial_indices = (
-        press_time_flattener(press_times, trial_time)
+        press_time_flattener(press_times, n_epochs, trial_time, sens_delay)
     )
     press_epochs = epochs_maker(
         raw, press_times_shifted, press_time_wind, sfreq, "press"
