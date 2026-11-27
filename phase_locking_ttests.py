@@ -32,7 +32,7 @@ def main():
         type=Path,
         default=Path(os.environ["MEG_DATA_ROOT"])
         if os.environ.get("MEG_DATA_ROOT") else None,
-        help="MEG export directory used to load sensor locations.",
+        help="MEG export directory; needed only to create the sensor topomap.",
     )
     parser.add_argument(
         "--output-dir",
@@ -81,6 +81,14 @@ def main():
         "Saved results to:",
         args.output_dir / phase_locking_ttest_results_file.name,
     )
+
+    # Sensor locations require the MEG export; keep the test results usable without it.
+    if args.data_root is None:
+        print(
+            "Skipping topomap: set MEG_DATA_ROOT or pass --data-root "
+            "to load sensor locations."
+        )
+        return
 
     # Plot participant mean phase-locking strength and mark raw p < 0.01 sensors.
     sensor_info = load_sensor_info(
