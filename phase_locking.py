@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import directional_stats
 
+from meg_data import load_button_press_times, load_epochs, meg_sensor_names
+
 
 # Set MEG_DATA_ROOT or pass --data-root to select a local MEG export.
 data_root = os.environ.get("MEG_DATA_ROOT", r"//rdp.arc.ucl.ac.uk/ritd-ag-project-rd01pz-dbush99/Katja Button Press Data")
@@ -34,78 +36,6 @@ output_file = os.path.join(
 theta_freq_band = [2.0, 5.0]                 # theta band edges in Hz
 excluded_subjects = ["11"]                   # participants excluded from analysis
 channel_batch_size = 8                       # channels loaded for each MNE processing batch
-
-
-# Match IDs from the NPZ file to the two-digit labels used by the MEG notebooks.
-def normalise_subject_id(id):
-    return str(int(str(id).strip().lower().lstrip("s"))).zfill(2)
-
-
-# Read and check the button-press timing arrays and their metadata.
-def load_button_press_times(file_name):
-    with np.load(file_name, allow_pickle=False) as press_file:
-        UPPT002_times = np.asarray(press_file["uppt002_times"], dtype=float)
-        subject_ID = np.asarray(
-            [normalise_subject_id(id) for id in press_file["subject_ID"]]
-        )
-        n_trials_by_subject = np.asarray(
-            press_file["n_trials_by_subject"], dtype=int
-        )
-        press_slot = np.asarray(press_file["press_slot"], dtype=int)
-        cue_onset_after_epoch_start_s = float(
-            np.asarray(press_file["cue_onset_after_epoch_start_s"]).item()
-        )
-        time_reference = str(press_file["time_reference"].item())
-
-    # Check the time reference and array layout before matching participants.
-    if "relative to cue onset" not in time_reference.lower():
-        raise ValueError(
-            "Expected button-press times in seconds relative to cue onset"
-        )
-    if UPPT002_times.ndim != 3 or UPPT002_times.shape[0] != len(subject_ID):
-        raise ValueError(
-            "Unexpected participant x trial x press-slot array shape"
-        )
-    if UPPT002_times.shape[2] != len(press_slot):
-        raise ValueError("Press-slot labels do not match the timing array")
-    if len(n_trials_by_subject) != len(subject_ID):
-        raise ValueError("Trial counts do not match the participant list")
-    if not np.array_equal(press_slot, np.arange(1, len(press_slot) + 1)):
-        raise ValueError("Expected press slots numbered in sequence from 1")
-
-    return (
-        UPPT002_times,
-        subject_ID,
-        n_trials_by_subject,
-        press_slot,
-        cue_onset_after_epoch_start_s,
-    )
-
-
-# Locate the participant's saved epochs using the repository's subject-folder naming.
-def filename_loader(id, data_root):
-    subject_number = str(int(id))
-    subject_folder = "s" + id
-    file_name = "Subject" + subject_number + "_spm_mne-epo.fif"
-    epochs_file = os.path.join(data_root, subject_folder, file_name)
-
-    # Also allow a local export with the FIF file directly in data_root.
-    if not os.path.isfile(epochs_file):
-        epochs_file = os.path.join(data_root, file_name)
-    if not os.path.isfile(epochs_file):
-        raise FileNotFoundError(
-            "Could not find " + file_name + " under " + data_root
-        )
-
-    # The participant function reads its MEG data once.
-    epochs = mne.read_epochs(epochs_file, preload=False, verbose="ERROR")
-    MEG_sens = [
-        channel for channel in epochs.ch_names if channel.startswith("M")
-    ]
-    if not MEG_sens:
-        raise ValueError("No MEG sensors found in " + epochs_file)
-
-    return epochs, MEG_sens
 
 
 # Average finite trial values and preserve NaN when no valid values are available.
@@ -131,8 +61,9 @@ def participant_phase_locking(
     press_slot,
     data_root,
 ):
-    # Load this participant's epochs and confirm the timing rows match.
-    epochs, MEG_sens = filename_loader(id, data_root)
+    # Load this participant's epochs through the shared MEG data helper.
+    epochs = load_epochs(data_root, id, preload=False, verbose="ERROR")
+    MEG_sens = meg_sensor_names(epochs)
     if len(epochs) != n_trials:
         raise ValueError(
             "Participant " + id + " has " + str(len(epochs))
@@ -266,13 +197,14 @@ def main():
     ):
         raise ValueError("The output file cannot overwrite the timing NPZ file")
 
-    (
-        UPPT002_times,
-        subject_ID,
-        n_trials_by_subject,
-        press_slot,
-        cue_onset_after_epoch_start_s,
-    ) = load_button_press_times(args.button_press_times_file)
+    press_data = load_button_press_times(args.button_press_times_file)
+    UPPT002_times = press_data["times"]
+    subject_ID = press_data["subject_ids"]
+    n_trials_by_subject = press_data["trial_counts"]
+    press_slot = press_data["press_slots"]
+    cue_onset_after_epoch_start_s = (
+        press_data["cue_onset_after_epoch_start_s"]
+    )
 
     # Keep two-digit subject labels and omit subject 11, as in phase_real.ipynb.
     sub_ID = [id for id in subject_ID if id not in excluded_subjects]
