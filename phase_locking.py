@@ -1,10 +1,11 @@
-"""Save participant-level mean theta phase-locking values for MEG sensors.
+"""Save participant-level mean and standard deviation of theta phase-locking values.
 
 For each included participant and trial, this script filters MEG epochs to the theta
 band, extracts phase at the five button-press times, and uses scipy.stats.directional_stats
-to calculate the mean direction vector and mean resultant length. It then averages the
-trial-wise mean resultant lengths for each participant and sensor and saves a wide
-participant-by-sensor CSV table. Larger values indicate more concentrated press phases.
+to calculate the mean direction vector and mean resultant length. It then averages
+those trial-wise lengths and calculates their sample standard deviation for each
+participant and sensor, saving separate wide CSV tables.
+Larger mean values indicate more concentrated press phases.
 The values are descriptive and are not significance tests.
 """
 
@@ -31,6 +32,9 @@ button_press_times_file = os.path.join(
 output_file = os.path.join(
     script_folder, "participant_phase_locking_table.csv"
 )
+std_output_file = os.path.join(
+    script_folder, "participant_phase_locking_std_table.csv"
+)
 
 # Define the theta frequency band and analysis settings.
 theta_freq_band = [2.0, 5.0]                 # theta band edges in Hz
@@ -49,6 +53,26 @@ def mean_finite(values, axis=0):
             counts.shape, np.nan, dtype=np.result_type(values.dtype, float)
         ),
         where=counts > 0,
+    )
+
+
+def std_finite(values, axis=0):
+    """Return sample standard deviations over finite trial values along an axis."""
+    values = np.asarray(values)
+    finite = np.isfinite(values)
+    counts = finite.sum(axis=axis)
+    mean = mean_finite(values, axis=axis)
+    centered = np.where(finite, values - np.expand_dims(mean, axis=axis), 0.0)
+    squared_deviations = np.sum(centered ** 2, axis=axis)
+    return np.sqrt(
+        np.divide(
+            squared_deviations,
+            counts - 1,
+            out=np.full(
+                counts.shape, np.nan, dtype=np.result_type(values.dtype, float)
+            ),
+            where=counts > 1,
+        )
     )
 
 
@@ -151,15 +175,17 @@ def participant_phase_locking(
 
     # Average valid trial values separately for each sensor.
     participant_mean = mean_finite(trial_resultant_length, axis=0)
+    participant_std = std_finite(trial_resultant_length, axis=0)
     n_trials_with_phase = int(
         np.isfinite(trial_resultant_length).any(axis=1).sum()
     )
 
-    # Release the full participant array before returning the sensor means.
+    # Release the full participant array before returning participant summaries.
     del MEG_data
 
     return (
         participant_mean,
+        participant_std,
         MEG_sens,
         int(complete_trial.sum()),
         n_trials_with_phase,
@@ -169,8 +195,8 @@ def participant_phase_locking(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Save mean theta phase-locking values across trials for each "
-            "included participant and MEG sensor."
+            "Save the mean and standard deviation of theta phase-locking "
+            "values across trials for each included participant and MEG sensor."
         )
     )
     parser.add_argument(
@@ -186,16 +212,25 @@ def main():
     parser.add_argument(
         "--output-file",
         default=output_file,
-        help="Wide participant-by-sensor CSV output file.",
+        help="Wide participant-by-sensor CSV file for mean values.",
+    )
+    parser.add_argument(
+        "--std-output-file",
+        default=std_output_file,
+        help="Wide participant-by-sensor CSV file for standard deviations.",
     )
     args = parser.parse_args()
 
     if not args.data_root:
         parser.error("Set MEG_DATA_ROOT or pass --data-root")
-    if os.path.abspath(args.output_file) == os.path.abspath(
-        args.button_press_times_file
-    ):
-        raise ValueError("The output file cannot overwrite the timing NPZ file")
+    output_paths = [
+        os.path.abspath(args.output_file),
+        os.path.abspath(args.std_output_file),
+    ]
+    if len(set(output_paths)) != len(output_paths):
+        raise ValueError("The mean and standard-deviation output files must differ")
+    if os.path.abspath(args.button_press_times_file) in output_paths:
+        raise ValueError("An output file cannot overwrite the timing NPZ file")
 
     press_data = load_button_press_times(args.button_press_times_file)
     UPPT002_times = press_data["times"]
@@ -213,11 +248,18 @@ def main():
         raise ValueError("No participants remain after applying excluded_subjects.")
 
     participant_means = []
+    participant_stds = []
     group_sensors = None
     for id in sub_ID:
         data_index = subject_index[id]
         n_trials = int(n_trials_by_subject[data_index])
-        participant_mean, MEG_sens, n_complete_trials, n_trials_with_phase = (
+        (
+            participant_mean,
+            participant_std,
+            MEG_sens,
+            n_complete_trials,
+            n_trials_with_phase,
+        ) = (
             participant_phase_locking(
                 id,
                 UPPT002_times[data_index],
@@ -235,6 +277,7 @@ def main():
             raise ValueError("MEG sensor order differs for participant " + id)
 
         participant_means.append(participant_mean)
+        participant_stds.append(participant_std)
         print(
             "Participant", id,
             "- complete trials:", n_complete_trials,
@@ -246,7 +289,15 @@ def main():
         participant_means, index=sub_ID, columns=group_sensors
     )
     participant_phase_locking_table.to_csv(args.output_file, index=False)
+    participant_phase_locking_std_table = pd.DataFrame(
+        participant_stds, index=sub_ID, columns=group_sensors
+    )
+    participant_phase_locking_std_table.to_csv(args.std_output_file, index=False)
     print("Saved participant mean phase-locking table to", args.output_file)
+    print(
+        "Saved participant phase-locking standard-deviation table to",
+        args.std_output_file,
+    )
 
 
 if __name__ == "__main__":
