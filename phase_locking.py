@@ -20,7 +20,7 @@ from meg_data import load_button_press_times, load_epochs, meg_sensor_names
 
 
 # Set MEG_DATA_ROOT or pass --data-root to select a local MEG export.
-data_root = os.environ.get("MEG_DATA_ROOT", r"//rdp.arc.ucl.ac.uk/ritd-ag-project-rd01pz-dbush99/Katja Button Press Data")
+data_root = os.environ.get("MEG_DATA_ROOT")
 
 
 # Keep the button-press timing file and output table alongside this script by default.
