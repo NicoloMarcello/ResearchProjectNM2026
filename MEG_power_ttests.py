@@ -11,13 +11,16 @@ import argparse
 import os
 from pathlib import Path
 
-import h5py
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import norm, ttest_1samp
+from scipy.stats import norm
+
+from meg_data import load_participant_data
+from sensor_stats import sensor_wise_one_sample_ttest
+from sensor_topomaps import plot_sensor_test_topomaps
 
 
 # Use data paths and outputs in the directory.
@@ -39,78 +42,6 @@ baseline_time_wind = np.array([-1.0, 0.0])   # baseline window before each trial
 mean_time_offset = -0.0468                   # MEG trigger offset in seconds
 sens_delay = 2.8 + mean_time_offset          # cue time relative to epoch start
 n_press_slots = 5
-
-
-def benjamini_hochberg(p_values):
-    """Adjust sensor-wise p-values while preserving missing values as NaN."""
-    p_values = np.asarray(p_values, dtype=float)
-    adjusted_p_values = np.full(p_values.shape, np.nan)
-    valid_indices = np.flatnonzero(np.isfinite(p_values))
-
-    if not len(valid_indices):
-        return adjusted_p_values
-
-    sort_order = np.argsort(p_values[valid_indices])
-    sorted_p_values = p_values[valid_indices][sort_order]
-    ranks = np.arange(1, len(sorted_p_values) + 1)
-    sorted_adjusted_p_values = sorted_p_values * len(sorted_p_values) / ranks
-    sorted_adjusted_p_values = np.minimum.accumulate(
-        sorted_adjusted_p_values[::-1]
-    )[::-1]
-    adjusted_p_values[valid_indices[sort_order]] = np.clip(
-        sorted_adjusted_p_values, 0, 1
-    )
-    return adjusted_p_values
-
-
-def filename_loader(id, data_root):
-    # Load cue-relative button press times and the participant's MEG epochs.
-    button_press_folder = data_root / "beh_data" / ("s" + id)
-    behaviour_file = button_press_folder / "behDataMEG.mat"
-    target_file = button_press_folder / "targetMEG.mat"
-
-    with h5py.File(behaviour_file, "r") as behaviour:
-        timings = np.asarray(behaviour["A/timing"][:]).T
-    with h5py.File(target_file, "r") as target:
-        cue_duration = np.asarray(target["T/cueDur"][:]).T
-
-    # Add each cue duration and convert the behavioral times from ms to seconds.
-    press_times = (
-        timings + np.tile(cue_duration, n_press_slots)
-    ) / 1000.0
-
-    subject_folder = data_root / ("s" + id)
-    file_name = "Subject" + str(int(id)) + "_spm_mne-epo.fif"
-    epochs_file = subject_folder / file_name
-    if not epochs_file.is_file():
-        epochs_file = data_root / file_name
-    if not epochs_file.is_file():
-        raise FileNotFoundError("Could not find " + file_name + " under " + str(data_root))
-
-    epochs = mne.read_epochs(epochs_file, preload=True, verbose="ERROR")
-
-    # Subject 16 has 222 saved epochs although its behavioral file has 240 rows.
-    if id == "16" and len(epochs) == 222 and press_times.shape[0] == 240:
-        print("Subject 16: using the first 222 behavioral trial rows.")
-        press_times = press_times[:len(epochs), :]
-    elif len(epochs) != press_times.shape[0]:
-        raise ValueError(
-            "Subject " + id + " has " + str(len(epochs))
-            + " MEG epochs but " + str(press_times.shape[0])
-            + " behavioral trials"
-        )
-
-    MEG_sens = [
-        channel for channel in epochs.ch_names if channel.startswith("M")
-    ]
-    if not MEG_sens:
-        raise ValueError("No MEG sensors found for subject " + id)
-
-    sensor_picks = mne.pick_channels(
-        epochs.ch_names, include=MEG_sens, ordered=True
-    )
-    sensor_info = mne.pick_info(epochs.info, sensor_picks, copy=True)
-    return press_times, epochs, MEG_sens, sensor_info
 
 
 def press_time_flattener(press_times, trial_time):
@@ -173,8 +104,19 @@ def mean_band_power(epochs, band, MEG_sens):
 
 
 def participant_theta_power(id, data_root):
-    press_times, epochs, MEG_sens, sensor_info = filename_loader(id, data_root)
-    sfreq = float(epochs.info["sfreq"])
+    # Load the participant's behavioral press times and matching MEG epochs.
+    participant_data = load_participant_data(
+        data_root,
+        id,
+        preload=True,
+        verbose="ERROR",
+        include_press_ids=False,
+    )
+    press_times = participant_data["press_times"]
+    epochs = participant_data["epochs"]
+    MEG_sens = participant_data["meg_sensors"]
+    sensor_info = participant_data["sensor_info"]
+    sfreq = participant_data["sfreq"]
 
     # Reshape the MEG epochs into a continuous-style RawArray.
     MEG_data = epochs.get_data(picks=MEG_sens)
@@ -244,10 +186,7 @@ def participant_theta_power(id, data_root):
         out=np.full(len(MEG_sens), np.nan),
         where=sensor_counts > 0,
     )
-    print(
-        "Participant", id,
-        "- retained button presses:", n_presses_used,
-    )
+    print("Participant", id, "- retained button presses:", n_presses_used)
     return theta_db_mean, MEG_sens, sensor_info, n_presses_used
 
 
@@ -317,61 +256,6 @@ def save_qq_plots(sensor_power_by_participant, sensor_names, output_file):
     print("Saved sensor Q-Q plots to:", output_file)
 
 
-def plot_sensor_power_results(results, sensor_info, output_base):
-    # Align the results to the sensor order in the MNE metadata.
-    results = results.set_index("sensor").loc[sensor_info["ch_names"]]
-    mean_power = results["mean_power_change_dB"].to_numpy(dtype=float)
-    p_values = results["p_value"].to_numpy(dtype=float)
-    significant_sensor = np.isfinite(p_values) & (p_values < 0.01)
-    sensor_types = [
-        mne.channel_type(sensor_info, index)
-        for index in range(len(sensor_info["ch_names"]))
-    ]
-
-    # Plot magnetometers and gradiometers separately, as their units differ.
-    for sensor_type in ("mag", "grad"):
-        sensor_picks = np.array([
-            index for index, kind in enumerate(sensor_types)
-            if kind == sensor_type
-        ])
-        if not len(sensor_picks):
-            continue
-
-        type_info = mne.pick_info(sensor_info, sensor_picks, copy=True)
-        fig, ax = plt.subplots(figsize=(7, 6))
-        image, _ = mne.viz.plot_topomap(
-            mean_power[sensor_picks],
-            type_info,
-            ch_type=sensor_type,
-            axes=ax,
-            cmap="RdBu_r",
-            contours=0,
-            mask=significant_sensor[sensor_picks],
-            mask_params={
-                "marker": "o",
-                "markerfacecolor": "yellow",
-                "markeredgecolor": "black",
-                "linestyle": "None",
-                "linewidth": 0.7,
-                "markersize": 7,
-            },
-            show=False,
-        )
-
-        ax.set_title(
-            "Mean baseline-corrected theta power; circles mark raw p < 0.01 ("
-            + sensor_type + ")"
-        )
-        fig.colorbar(image, ax=ax, label="Mean power change (dB)")
-        fig.tight_layout()
-        plot_file = output_base.with_name(
-            output_base.stem + "_" + sensor_type + output_base.suffix
-        )
-        fig.savefig(plot_file, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        print("Saved scalp map to:", plot_file)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -434,44 +318,14 @@ def main():
         args.output_dir / participant_power_table_file.name
     )
 
-    # Arrange the independent participant means as sensors x participants.
+    # Use the shared sensor-wise t-test and FDR implementation.
     sensor_power_by_participant = participant_power_table.to_numpy(
         dtype=float
     ).T
-    n_participants_by_sensor = np.isfinite(
-        sensor_power_by_participant
-    ).sum(axis=1)
-    if np.any(n_participants_by_sensor < 2):
-        insufficient_sensors = np.asarray(group_sensors)[
-            np.flatnonzero(n_participants_by_sensor < 2)
-        ]
-        raise ValueError(
-            "At least two finite participant values are required for every "
-            "sensor. Insufficient data for: "
-            + ", ".join(map(str, insufficient_sensors[:10]))
-        )
-
-    # Test whether mean participant power change differs from 0 dB for each sensor.
-    sensor_power_ttest = ttest_1samp(
-        sensor_power_by_participant,
+    results = sensor_wise_one_sample_ttest(
+        participant_power_table,
+        value_name="power_change_dB",
         popmean=0.0,
-        axis=1,
-        nan_policy="omit",
-    )
-    results = pd.DataFrame({
-        "sensor": group_sensors,
-        "n_participants": n_participants_by_sensor,
-        "mean_power_change_dB": np.nanmean(
-            sensor_power_by_participant, axis=1
-        ),
-        "std_power_change_dB": np.nanstd(
-            sensor_power_by_participant, axis=1, ddof=1
-        ),
-        "t_statistic": sensor_power_ttest.statistic,
-        "p_value": sensor_power_ttest.pvalue,
-    })
-    results["p_value_fdr"] = benjamini_hochberg(
-        results["p_value"].to_numpy()
     )
     results.to_csv(
         args.output_dir / power_ttest_results_file.name, index=False
@@ -479,8 +333,15 @@ def main():
 
     qq_file = args.output_dir / power_ttest_qq_file.name
     save_qq_plots(sensor_power_by_participant, group_sensors, qq_file)
-    plot_sensor_power_results(
-        results, group_info, args.output_dir / power_ttest_topomap_file.name
+    plot_sensor_test_topomaps(
+        results,
+        group_info,
+        args.output_dir / power_ttest_topomap_file.name,
+        mean_column="mean_power_change_dB",
+        colorbar_label="Mean power change (dB)",
+        title_prefix="Mean baseline-corrected theta power",
+        p_value_column="p_value",
+        threshold=0.01,
     )
 
     participant_summary = pd.DataFrame({
