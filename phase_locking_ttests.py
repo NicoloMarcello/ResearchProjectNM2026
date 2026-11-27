@@ -31,8 +31,9 @@ def main():
         "--data-root",
         type=Path,
         default=Path(os.environ["MEG_DATA_ROOT"])
-        if os.environ.get("MEG_DATA_ROOT") else None,
-        help="MEG export directory; needed only to create the sensor topomap.",
+        if os.environ.get("MEG_DATA_ROOT")
+        else Path(r"\\rdp.arc.ucl.ac.uk\ritd-ag-project-rd01pz-dbush99\Katja Button Press Data\s05"),
+        help="MEG export directory used to load sensor locations.",
     )
     parser.add_argument(
         "--output-dir",
